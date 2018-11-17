@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+
+main() {
+  v12n_path=/v12n
+
+  # https://mywiki.wooledge.org/ComplexOptionParsing
+  i=$(($# + 1))
+  declare -A longoptspec
+  longoptspec=(
+    [create]=1
+    [name]=1
+    [pass]=1
+    [console]=1
+    [status]=1
+    [start]=1
+    [stop]=1
+  )
+
+  optspec=":h-:"
+  while getopts "$optspec" opt; do
+  while :; do
+    case "${opt}" in
+      -) if [[ ${OPTARG} =~ .*=.* ]]; then
+         opt=${OPTARG/=*/}
+         ((${#opt} <= 1)) && {
+           talk "Syntax error: Invalid long option '$opt'" >&2
+           exit 2
+         }
+         if (($((longoptspec[$opt])) != 1)); then
+           talk "Syntax error: Option '$opt' does not support this syntax." >&2
+           exit 2
+         fi
+         OPTARG=${OPTARG#*=}
+         else
+           opt="$OPTARG"
+           ((${#opt} <= 1)) && {
+             talk "Syntax error: Invalid long option '$opt'" >&2
+             exit 2
+           }
+         OPTARG=(${@:OPTIND:$((longoptspec[$opt]))})
+         ((OPTIND+=longoptspec[$opt]))
+         ((OPTIND > i)) && {
+           talk "Syntax error: Not all required arguments for option '$opt' are given." >&2
+           exit 3
+           }
+         fi
+         continue;;
+
+      create) create "${OPTARG}";;
+      name) name="${OPTARG}";;
+      pass) password="${OPTARG}";;
+      list) list ;;
+      show) show=1;;
+      console) su_as_vm "${OPTARG}" "virsh console ${OPTARG}";;
+      start) su_as_vm "${OPTARG}" "virsh start ${OPTARG}";;
+      stop) su_as_vm "${OPTARG}" "virsh destroy ${OPTARG}";;
+      h|help) usage; exit 0;;
+      ?) talk "Syntax error: Unknown short option '$OPTARG'" >&2; exit 2;;
+      *) talk "Syntax error: Unknown long option '$opt'" >&2; exit 2;;
+      esac
+      break
+  done
+  done
+}
+
+usage() {
+  case "${1}" in
+    "status") talk "--status on\n--status off";;
+    "list") talk "--status on|off\n--all";;
+    "create") talk "--create user|vm --name name --pass pass --show";;
+    "add_vuser") talk "--name USERNAME [--password PASSWORD]";;
+    "add_vm") talk "--name VMNAME [--password PASSWORD]";;
+    *|"") printf '%s\n' "${cases[@]}";;
+  esac
+  exit
+}
+
+create() {
+  case "${1}" in
+    "user") shift; add_vuser "${@}";;
+    "vm") shift; add_vm "${@}";;
+    *|"") usage "create";;
+  esac
+}
+
+check_root() {
+  [[ $(whoami) = root ]] || die "must be root"
+}
+
+add_vuser() {
+  check_root
+  user="${name}"
+  password="${password}"
+  home="${v12n_path}/${user}"
+  [[ -z "${user}" ]] && usage "add_vuser"
+  [[ -z "${password}" ]] && \
+  password=$(< /dev/urandom tr -dc _A-Za-z0-9 | head -c8; echo)
+  adduser --quiet --disabled-password --gecos User --ingroup kvm \
+          --home "${home}" --firstuid 2001 --lastuid 2050 "${user}" && \
+  echo "${user}":"${password}" | chpasswd && \
+  mkdir -p "${home}/.local/share/libvirt" && \
+  chmod 750 "${home}" && \
+  chown -R "${user}" "${home}" && \
+  talk "user ${user} created"
+  [[ "${show}" = "1" ]] && talk "password: ${password}"
+}
+
+list() {
+  case "${1}" in
+    --status) list_vm_with_status "${2}";;
+    --all) list_dirs_in_path;;
+    *) usage "list";;
+  esac
+}
+
+# run command as vm user
+su_as_vm() {
+  [[ -z "${1}" ]] && die "no vm name specified"
+  su - "${1}" -c "${2}"
+}
+
+# list vms. on or off of them
+list_vm_with_status() {
+  case "${1}" in
+    on) state="state-running";;
+    off) state="state-shutoff";;
+    *) usage "status";;
+  esac
+  check_root
+  for vm in $(list_dirs_in_path)
+  do
+    su_as_vm "${vm}" "virsh list --name --${state}" | \
+    awk 'NR>1 {print last} {last=$0}'
+  done
+}
+
+# each vm has a home dir. list all home dirs
+list_dirs_in_path() {
+  find "${v12n_path}" -mindepth 1 -maxdepth 1 -type d \
+  ! -path "${v12n_path}/.*" \
+  ! -path "${v12n_path}/lost+found" -exec basename {} \;
+}
+
+talk() {
+  echo -e "${1}"
+}
+
+die() {
+  talk "error: ${1}"
+  [[ -n "${2}" ]] && usage "${2}"
+  exit 1
+}
+
+main "${@}"
