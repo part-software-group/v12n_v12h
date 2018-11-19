@@ -69,7 +69,7 @@ def password_gen( size ):
 
 def listdir_nohidden():
     for f in os.listdir( v12n_home ):
-        if not f.startswith( '.' ):
+        if not f.startswith( '.' ) and not f == "lost+found":
             yield f
 
 if args.console:
