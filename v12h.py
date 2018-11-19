@@ -13,13 +13,13 @@ show, password_num = False, 12
 parser = argparse.ArgumentParser()
 parser.add_argument( "--list", "-l", help="list vms", action="store_true" )
 parser.add_argument( "--status", "-s", help="list with status on|off", nargs=1 )
-parser.add_argument( "--create-user", "-cu", help="create user", nargs=1 )
-parser.add_argument( "--create-vm", "-cv", help="create vm", nargs=1 )
+parser.add_argument( "--create-user", "-a", help="create user", nargs=1 )
+parser.add_argument( "--create-vm", "-m", help="create vm", nargs=1 )
 parser.add_argument( "--password", "-p", help="password", nargs=1 )
 parser.add_argument( "--show", "-w", help="show password", action="store_true" )
-parser.add_argument( "--console", "-c", help="console to vm" )
-parser.add_argument( "--start", "-S", help="start vm" )
-parser.add_argument( "--stop", "-P", help="stop vm" )
+parser.add_argument( "--console", "-n", help="console to vm" )
+parser.add_argument( "--start", "-r", help="start vm" )
+parser.add_argument( "--stop", "-D", help="stop vm" )
 args = parser.parse_args()
 
 def check_root():
