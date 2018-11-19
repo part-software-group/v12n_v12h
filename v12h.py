@@ -4,8 +4,7 @@ import os
 import argparse
 import string
 import subprocess
-
-#import secrets
+import random
 #import libvirt
 
 v12n_home = "/v12n"
@@ -66,7 +65,7 @@ def create_vm( vm ):
     return
 
 def password_gen( size ):
-    return ''.join( secrets.choice(string.ascii_lowercase + string.digits ) for _ in range(size))
+    return ''.join( random.choice( string.ascii_lowercase + string.digits ) for _ in range( size ) )
 
 def listdir_nohidden():
     for f in os.listdir( v12n_home ):
@@ -87,6 +86,12 @@ if args.list and args.status:
     elif ( args.status[0] == 'off' ):
         state = "state-shutoff"
     for vm in listdir_nohidden():
+        print( "user: " + vm )
+        i = -5
+        while i <= len( vm ):
+            print( "-", end="" )
+            i += 1
+        print()
         su_as_vm( vm, "virsh list --name --" + state )
 
 if args.list and not args.status:
