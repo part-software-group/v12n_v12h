@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# https://docs.python.org/3/howto/argparse.html
 import os
 import argparse
 import string
@@ -23,17 +22,20 @@ parser.add_argument( "--stop", "-D", help="stop vm" )
 args = parser.parse_args()
 
 def check_root():
+    "some functions need root permission"
     if os.geteuid() != 0:
         exit( "error: not root" )
 
 def su_as_vm( vm, command ):
+    "su as user that runs vm"
     check_root()
     if vm:
         subprocess.run( ["su", "-", vm, "-c", command] )
     else:
         print( "no vm name specified" )
 
-def linux_adduser( user, password ):
+def create_user( user, password ):
+    "creating system user under /v12n as $HOME"
     user_home = v12n_home + "/" + user
     subprocess.run( ["adduser", "--quiet", "--disabled-password", 
                      "--gecos", "User", "--ingroup", "kvm",
@@ -48,15 +50,15 @@ def linux_adduser( user, password ):
     os.chmod( user_home, 0o750 )
     subprocess.run( ["chown", "-R", user + ":" + "kvm", user_home] )
 
-def create_user( user, password ):
-    "creating system user under /v12n as $HOME"
+def show_pass( user, password ):
+    "show password or not"
     check_root()
     if show:
         print( "creating user", user, "with password", password )
-        linux_adduser( user, password )
+        create_user( user, password )
     else:
         print( "creating user", user )
-        linux_adduser( user, password )
+        create_user( user, password )
     return
 
 def create_vm( vm ):
@@ -65,9 +67,11 @@ def create_vm( vm ):
     return
 
 def password_gen( size ):
+    "generating random password"
     return ''.join( random.choice( string.ascii_lowercase + string.digits ) for _ in range( size ) )
 
 def listdir_nohidden():
+    "list all in v12n_home but not hidden and lost+found"
     for f in os.listdir( v12n_home ):
         if not f.startswith( '.' ) and not f == "lost+found":
             yield f
@@ -106,8 +110,7 @@ if args.create_user:
         password = args.password[0]
     else:
         password = password_gen( password_num )
-    create_user( user = args.create_user[0], 
-                 password = password )
+    show_pass( user = args.create_user[0], password = password )
 
 if args.create_vm: 
     create_vm( vm = args.create_vm[0] )
