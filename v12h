@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-
+set -x
 main() {
   v12n_path=/v12n
 
@@ -16,32 +16,36 @@ main() {
     [stop]=1
   )
 
-  optspec=":h-:"
-  while getopts "$optspec" opt; do
-  while :; do
+  optspec=":l:h-:"
+  while getopts "$optspec" opt
+  do
+  while true
+  do
     case "${opt}" in
-      -) if [[ ${OPTARG} =~ .*=.* ]]; then
-         opt=${OPTARG/=*/}
-         ((${#opt} <= 1)) && {
-           talk "Syntax error: Invalid long option '$opt'" >&2
-           exit 2
-         }
-         if (($((longoptspec[$opt])) != 1)); then
-           talk "Syntax error: Option '$opt' does not support this syntax." >&2
-           exit 2
-         fi
-         OPTARG=${OPTARG#*=}
+      -) if [[ ${OPTARG} =~ .*=.* ]]
+         then
+           opt=${OPTARG/=*/}
+           ((${#opt} <= 1)) && {
+             talk "Syntax error: Invalid long option '$opt'" >&2
+             exit 2
+           }
+           if (($((longoptspec[$opt])) != 1))
+           then
+             talk "Syntax error: Option '$opt' does not support this syntax." >&2
+             exit 2
+           fi
+           OPTARG=${OPTARG#*=}
          else
            opt="$OPTARG"
            ((${#opt} <= 1)) && {
              talk "Syntax error: Invalid long option '$opt'" >&2
              exit 2
            }
-         OPTARG=(${@:OPTIND:$((longoptspec[$opt]))})
-         ((OPTIND+=longoptspec[$opt]))
-         ((OPTIND > i)) && {
-           talk "Syntax error: Not all required arguments for option '$opt' are given." >&2
-           exit 3
+           OPTARG=(${@:OPTIND:$((longoptspec[$opt]))})
+           ((OPTIND+=longoptspec[$opt]))
+           ((OPTIND > i)) && {
+             talk "Syntax error: Not all required arguments for option '$opt' are given." >&2
+             exit 3
            }
          fi
          continue;;
@@ -54,31 +58,36 @@ main() {
       console) su_as_vm "${OPTARG}" "virsh console ${OPTARG}";;
       start) su_as_vm "${OPTARG}" "virsh start ${OPTARG}";;
       stop) su_as_vm "${OPTARG}" "virsh destroy ${OPTARG}";;
-      h|help) usage; exit 0;;
+      ""|h|help) usage;;
       ?) talk "Syntax error: Unknown short option '$OPTARG'" >&2; exit 2;;
       *) talk "Syntax error: Unknown long option '$opt'" >&2; exit 2;;
       esac
       break
   done
   done
+  echo ${name} 
 }
 
 usage() {
   case "${1}" in
-    "status") talk "--status on\n--status off";;
-    "list") talk "--status on|off\n--all";;
-    "create") talk "--create user|vm --name name --pass pass --show";;
-    "add_vuser") talk "--name USERNAME [--password PASSWORD]";;
-    "add_vm") talk "--name VMNAME [--password PASSWORD]";;
-    *|"") printf '%s\n' "${cases[@]}";;
+    "list") talk "--list [ --all | --status on|off ]";;
+    "status") talk "--status on|off";;
+    "create") talk "--create [ user|vm --name name --pass pass --show ]";;
+    *|"") usage "list"; usage "create";;
   esac
-  exit
+  return
+}
+
+add_vm() {
+  vm="${name}"
+  [[ -z "${vm}" ]] && usage "create"
+  echo "${name}"
 }
 
 create() {
   case "${1}" in
-    "user") shift; add_vuser "${@}";;
-    "vm") shift; add_vm "${@}";;
+    "user") add_vuser;;
+    "vm") add_vm;;
     *|"") usage "create";;
   esac
 }
@@ -88,13 +97,13 @@ check_root() {
 }
 
 add_vuser() {
-  check_root
   user="${name}"
   password="${password}"
   home="${v12n_path}/${user}"
-  [[ -z "${user}" ]] && usage "add_vuser"
+  [[ -z "${user}" ]] && usage "create"
   [[ -z "${password}" ]] && \
   password=$(< /dev/urandom tr -dc _A-Za-z0-9 | head -c8; echo)
+  check_root
   adduser --quiet --disabled-password --gecos User --ingroup kvm \
           --home "${home}" --firstuid 2001 --lastuid 2050 "${user}" && \
   echo "${user}":"${password}" | chpasswd && \

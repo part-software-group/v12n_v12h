@@ -10,7 +10,6 @@ import subprocess
 
 v12n_home = "/v12n"
 show, password_num = False, 12 
-status = "all"
 
 parser = argparse.ArgumentParser()
 parser.add_argument( "--list", "-l", help="list vms", action="store_true" )
@@ -69,8 +68,8 @@ def create_vm( vm ):
 def password_gen( size ):
     return ''.join( secrets.choice(string.ascii_lowercase + string.digits ) for _ in range(size))
 
-def listdir_nohidden( path ):
-    for f in os.listdir( path ):
+def listdir_nohidden():
+    for f in os.listdir( v12n_home ):
         if not f.startswith( '.' ):
             yield f
 
@@ -87,11 +86,12 @@ if args.list and args.status:
         state = "state-running"
     elif ( args.status[0] == 'off' ):
         state = "state-shutoff"
-    for vm in listdir_nohidden( v12n_home ):
+    for vm in listdir_nohidden():
         su_as_vm( vm, "virsh list --name --" + state )
 
 if args.list and not args.status:
-        listdir_nohidden( v12n_home )
+    for vm in listdir_nohidden():
+        print( vm )
 
 if args.show:
     show = True
