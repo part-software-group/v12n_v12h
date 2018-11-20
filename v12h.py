@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 import os
 import argparse
 import string
@@ -19,6 +19,10 @@ parser.add_argument( "--show", "-w", help="show password", action="store_true" )
 parser.add_argument( "--console", "-n", help="console to vm" )
 parser.add_argument( "--start", "-r", help="start vm" )
 parser.add_argument( "--stop", "-D", help="stop vm" )
+parser.add_argument( "--add-bridge", "-b",
+                     help="adding bridge stuff",
+                     action="store_true" )
+parser.add_argument( "--bridge-ip", "-I", help="ip address to set on bridge" )
 args = parser.parse_args()
 
 def check_root():
@@ -30,25 +34,25 @@ def su_as_vm( vm, command ):
     "su as user that runs vm"
     check_root()
     if vm:
-        subprocess.run( ["su", "-", vm, "-c", command] )
+        subprocess.run( [ "su", "-", vm, "-c", command ] )
     else:
         print( "no vm name specified" )
 
 def create_user( user, password ):
     "creating system user under /v12n as $HOME"
     user_home = v12n_home + "/" + user
-    subprocess.run( ["adduser", "--quiet", "--disabled-password", 
-                     "--gecos", "User", "--ingroup", "kvm",
-                     "--home", user_home, "--firstuid", "2001", 
-                     "--lastuid", "2050", user] )
-    p1 = subprocess.Popen( ["echo", user + ":" + password], 
-                            stdout=subprocess.PIPE )
-    p2 = subprocess.Popen( ["chpasswd"], stdin=p1.stdout )
+    subprocess.run( [ "adduser", "--quiet", "--disabled-password",
+                      "--gecos", "User", "--ingroup", "kvm",
+                      "--home", user_home, "--firstuid", "2001",
+                      "--lastuid", "2050", user ] )
+    p1 = subprocess.Popen( [ "echo", user + ":" + password ],
+                              stdout=subprocess.PIPE )
+    p2 = subprocess.Popen( [ "chpasswd" ], stdin=p1.stdout )
     p1.stdout.close()
     output = p2.communicate()[0]
     os.makedirs( user_home + "/.local/share/libvirt" )
     os.chmod( user_home, 0o750 )
-    subprocess.run( ["chown", "-R", user + ":" + "kvm", user_home] )
+    subprocess.run( [ "chown", "-R", user + ":" + "kvm", user_home ] )
 
 def show_pass( user, password ):
     "show password or not"
@@ -75,6 +79,24 @@ def listdir_nohidden():
     for f in os.listdir( v12n_home ):
         if not f.startswith( '.' ) and not f == "lost+found":
             yield f
+
+def setup_bridge( br_ip ):
+    "setting up bridge interface and qemu related stuff"
+    check_root()
+    with open( "/etc/network/inetrfaces.d/br0", "x" ) as br:
+        br.write( "auto br0\n"
+                  "iface br0 inet static\n"
+                  "  address " + br_ip + "\n"
+                  "  bridge_ports eth0\n"
+                  "  bridge_stp off\n"
+                  "  bridge_fd 0\n" )
+    with open( "/etc/qemu/bridge.conf", "w" ) as bc:
+        bc.write( "allow br0\n" )
+    subprocess.run( [ "ip", "address", "flush", "eth0", "scope", "global" ] )
+    subprocess.run( [ "ifup", "br0" ] )
+    subprocess.run( [ "setcap",
+                      "cap_net_admin+ep",
+                      "/usr/lib/qemu/qemu-bridge-helper" ] )
 
 if args.console:
     su_as_vm( args.console, "virsh console " + args.console ) 
@@ -115,3 +137,5 @@ if args.create_user:
 if args.create_vm: 
     create_vm( vm = args.create_vm[0] )
 
+if args.add_bridge:
+    setup_bridge( br_ip = args.bridge_ip )
