@@ -83,7 +83,7 @@ def listdir_nohidden():
 def setup_bridge( br_ip ):
     "setting up bridge interface and qemu related stuff"
     check_root()
-    with open( "/etc/network/inetrfaces.d/br0", "x" ) as br:
+    with open( "/etc/network/inetrfaces.d/br0", "w" ) as br:
         br.write( "auto br0\n"
                   "iface br0 inet static\n"
                   "  address " + br_ip + "\n"
@@ -138,4 +138,7 @@ if args.create_vm:
     create_vm( vm = args.create_vm[0] )
 
 if args.add_bridge:
-    setup_bridge( br_ip = args.bridge_ip )
+    if args.bridge_ip:
+        setup_bridge( br_ip = args.bridge_ip )
+    else:
+        exit( "error: no ip address defined" )
