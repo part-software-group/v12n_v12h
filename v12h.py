@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import sys
 import argparse
 import string
 import subprocess
@@ -10,10 +11,10 @@ v12n_home = "/v12n"
 show, password_num = False, 12 
 
 parser = argparse.ArgumentParser()
+parser.add_argument( "--test", "-t", help="testing purpose" )
 parser.add_argument( "--list", "-l", help="list vms", action="store_true" )
 parser.add_argument( "--status", "-s", help="list with status on|off", nargs=1 )
-parser.add_argument( "--create-user", help="create user", nargs=1 )
-parser.add_argument( "--create-vm", help="create vm", nargs=1 )
+parser.add_argument( "--new-vm", help="create vm", nargs=1 )
 parser.add_argument( "--password", help="password", nargs=1 )
 parser.add_argument( "--show", help="show password", action="store_true" )
 parser.add_argument( "--virsh", "-i", help="virsh of vm" )
@@ -31,7 +32,7 @@ args = parser.parse_args()
 def check_root():
     "some functions need root permission"
     if os.geteuid() != 0:
-        exit( "error: must be root" )
+        sys.exit( "error: must be root" )
 
 def su_as_vm( vm, command ):
     "su as user that runs vm"
@@ -40,22 +41,6 @@ def su_as_vm( vm, command ):
         subprocess.run( [ "su", "-", vm, "-c", command ] )
     else:
         print( "no vm name specified" )
-
-def create_user( user, password ):
-    "creating system user under /v12n as $HOME"
-    user_home = v12n_home + "/" + user
-    subprocess.run( [ "adduser", "--quiet", "--disabled-password",
-                      "--gecos", "User", "--ingroup", "kvm",
-                      "--home", user_home, "--firstuid", "2001",
-                      "--lastuid", "2050", user ] )
-    p1 = subprocess.Popen( [ "echo", user + ":" + password ],
-                              stdout=subprocess.PIPE )
-    p2 = subprocess.Popen( [ "chpasswd" ], stdin=p1.stdout )
-    p1.stdout.close()
-    output = p2.communicate()[0]
-    os.makedirs( user_home + "/.local/share/libvirt" )
-    os.chmod( user_home, 0o750 )
-    subprocess.run( [ "chown", "-R", user + ":" + "kvm", user_home ] )
 
 def show_pass( user, password ):
     "show password or not"
@@ -68,10 +53,43 @@ def show_pass( user, password ):
         create_user( user, password )
     return
 
+def linux_adduser( user, user_home ):
+    r = subprocess.call( [ "useradd", "--comment", "added_by_v12h",
+                                     "--create-home", "--home-dir", user_home,
+                                     "--no-user-group", "--group", "kvm",
+                                     "--key", "UID_MIN=2001",
+                                     "--key", "UID_MAX=2050",
+                                     user ] )
+    if r == 0:
+        return( True )
+    else:
+        return( False )
+
+def create_user( user, password ):
+    "creating system user under /v12n as $HOME"
+    user_home = v12n_home + "/" + user
+
+    if linux_adduser( user, user_home ):
+        print( "user " + user + " created successfuly" )
+    else:
+        sys.exit( "error: adduser failed" )
+
+    p1 = subprocess.Popen( [ "echo", user + ":" + password ],
+                              stdout=subprocess.PIPE )
+    p2 = subprocess.Popen( [ "chpasswd" ], stdin=p1.stdout )
+    p1.stdout.close()
+    output = p2.communicate()[0]
+    os.makedirs( user_home + "/.local/share/libvirt" )
+    os.chmod( user_home, 0o750 )
+    subprocess.run( [ "chown", "-R", user + ":" + "kvm", user_home ] )
+    print( "$HOME is " + user_home )
+    create_vm( user )
+
 def create_vm( vm ):
     "creating vm with the help of packer"
-    print( "creating vm", vm )
-    return
+    print( "creating vm with user " + vm )
+    su_as_vm( vm, "git clone --depth=1 http://fakhraee:@/network_devops/devops_packer.git packer" )
+    su_as_vm( vm, "nano $HOME/packer/qemu/debian/stretch.json" )
 
 def password_gen( size ):
     "generating random password"
@@ -103,6 +121,9 @@ def setup_bridge( br_on, br_if, br_ip ):
     subprocess.run( [ "setcap",
                       "cap_net_admin+ep",
                       "/usr/lib/qemu/qemu-bridge-helper" ] )
+
+if args.test:
+    create_vm( vm = args.test )
 
 if args.virsh:
     su_as_vm( args.virsh, "virsh" )
@@ -137,15 +158,12 @@ if args.list and not args.status:
 if args.show:
     show = True
 
-if args.create_user:
+if args.new_vm:
     if args.password:
         password = args.password[0]
     else:
         password = password_gen( password_num )
-    show_pass( user = args.create_user[0], password = password )
-
-if args.create_vm: 
-    create_vm( vm = args.create_vm[0] )
+    show_pass( user = args.new_vm[0], password = password )
 
 if args.add_bridge:
     if args.bridge_if:
