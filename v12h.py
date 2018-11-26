@@ -7,13 +7,12 @@ import subprocess
 import random
 #import libvirt
 
-my_name = "v12h"
+my_name = "[v12h]"
 my_version = ""
 v12n_home = "/v12n"
 show, password_num = False, 12 
 
 parser = argparse.ArgumentParser()
-parser.add_argument( "--test", "-t", help="testing purpose" )
 parser.add_argument( "--list", "-l", help="list vms", action="store_true" )
 parser.add_argument( "--status", "-s", help="list with status on|off", nargs=1 )
 parser.add_argument( "--new-vm", help="create vm", nargs=1 )
@@ -30,6 +29,7 @@ parser.add_argument( "--set-mem", help="set vm memory to (if maxmem)" )
 parser.add_argument( "--add-bridge", help="add bridge on, ex: eth0" )
 parser.add_argument( "--bridge-if", help="name of the bridge, ex: br0" )
 parser.add_argument( "--bridge-ip", help="ip address to set on bridge" )
+parser.add_argument( "--hv-up", help="rise up", action="store_true" )
 args = parser.parse_args()
 
 class bcolors:
@@ -42,7 +42,6 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
-
 def check_root():
     "some functions need root permission"
     if os.geteuid() != 0:
@@ -53,32 +52,32 @@ def su_as_vm( vm, command ):
     "su as user that runs vm"
     check_root()
     if vm:
-        subprocess.run( [ "su", "-", vm, "-c", command ] )
+        subprocess.call( [ "su", "-", vm, "-c", command ] )
     else:
-        print( bcolors.WARNING + my_name +
-               " no vm name specified" + bcolors.ENDC )
+        print( bcolors.WARNING + my_name,
+               "no vm name specified" + bcolors.ENDC )
 
 def show_pass( user, password ):
     "show password or not"
     check_root()
     if show:
-        print( bcolors.OKGREEN + my_name +
-               " creating user", user, "with password", password +
+        print( bcolors.OKGREEN + my_name,
+               "creating user", user, "with password", password +
                bcolors.ENDC )
         create_user( user, password )
     else:
-        print( bcolors.OKGREEN + my_name +
-               " creating user", user + bcolors.ENDC )
+        print( bcolors.OKGREEN + my_name,
+               "creating user", user + bcolors.ENDC )
         create_user( user, password )
     return
 
 def linux_adduser( user, user_home ):
     r = subprocess.call( [ "useradd", "--comment", "added_by_v12h",
-                                     "--create-home", "--home-dir", user_home,
-                                     "--no-user-group", "--group", "kvm",
-                                     "--key", "UID_MIN=2001",
-                                     "--key", "UID_MAX=2050",
-                                     user ] )
+                           "--create-home", "--home-dir", user_home,
+                           "--no-user-group", "--group", "kvm",
+                           "--key", "UID_MIN=2001",
+                           "--key", "UID_MAX=2050",
+                           user ] )
     if r == 0:
         return( True )
     else:
@@ -89,11 +88,11 @@ def create_user( user, password ):
     user_home = v12n_home + "/" + user
 
     if linux_adduser( user, user_home ):
-        print( bcolors.OKGREEN + my_name +
-               " user " + user + " created successfuly" + bcolors.ENDC )
+        print( bcolors.OKGREEN + my_name,
+               "user", user, "created successfuly" + bcolors.ENDC )
     else:
-        sys.exit( bcolors.FAIL + my_name +
-                  " error: adduser failed" + bcolors.ENDC )
+        sys.exit( bcolors.FAIL + my_name,
+                  "error: adduser failed" + bcolors.ENDC )
 
     p1 = subprocess.Popen( [ "echo", user + ":" + password ],
                               stdout=subprocess.PIPE )
@@ -102,17 +101,20 @@ def create_user( user, password ):
     output = p2.communicate()[0]
     os.makedirs( user_home + "/.local/share/libvirt" )
     os.chmod( user_home, 0o750 )
-    subprocess.run( [ "chown", "-R", user + ":" + "kvm", user_home ] )
-    print( bcolors.OKGREEN + my_name + " $HOME is " + user_home + bcolors.ENDC )
-    create_vm( user )
+    subprocess.call( [ "chown", "-R", user + ":" + "kvm", user_home ] )
+    print( bcolors.OKGREEN + my_name, "$HOME is " + user_home + bcolors.ENDC )
+    create_vm( user, user_home )
 
-def create_vm( vm ):
+def create_vm( vm, user_home ):
     "creating vm with the help of packer"
-
-    print( bcolors.OKGREEN + my_name +
-           " creating vm with user " + vm + bcolors.ENDC )
-    su_as_vm( vm, "git clone --depth=1 " + packer_git + " packer" )
-    su_as_vm( vm, "nano $HOME/packer/qemu/debian/stretch.json" )
+    packer_log = "1"
+    packer_json = "stretch.json"
+    print( bcolors.OKGREEN + my_name,
+           "creating vm with user", vm + bcolors.ENDC )
+    su_as_vm( vm, "cp -r /v12n/.packer $HOME" )
+    su_as_vm( vm, "cd " + user_home + "/.packer/qemu/debian && nano " +
+                   packer_json + "&&" + "PACKER_LOG=" + packer_log +
+                   " packer build " + packer_json )
 
 def password_gen( size ):
     "generating random password"
@@ -139,11 +141,23 @@ def setup_bridge( br_on, br_if, br_ip ):
                   "  bridge_fd 0\n" )
     with open( "/etc/qemu/bridge.conf", "w+" ) as bc:
         bc.write( "allow " + bf + "\n" )
-    subprocess.run( [ "ip", "address", "flush", bo, "scope", "global" ] )
-    subprocess.run( [ "ifup", bf ] )
-    subprocess.run( [ "setcap",
+    subprocess.call( [ "ip", "address", "flush", bo, "scope", "global" ] )
+    subprocess.call( [ "ifup", bf ] )
+    subprocess.call( [ "setcap",
                       "cap_net_admin+ep",
                       "/usr/lib/qemu/qemu-bridge-helper" ] )
+
+def hv_up():
+    "setup all needed for a host to be a kvm hv"
+    check_root()
+    subprocess.call( [ "apt-get", "--yes", "--no-install-recommends", "install",
+                       "atop", "htop", "git", "screen", "udhcpd"
+                       "packer", "qemu-kvm", "libvirt-daemon-system",
+                       "libvirt-clients" ] )
+    if not os.path.exists( v12n_home ):
+        os.makedirs( v12n_home )
+        print( bcolors.OKGREEN + my_name, v12n_home,
+               "created" + bcolors.ENDC )
 
 if args.virsh:
     su_as_vm( args.virsh, "virsh" )
@@ -183,12 +197,6 @@ if args.new_vm:
         password = args.password[ 0 ]
     else:
         password = password_gen( password_num )
-
-    if args.packer_git:
-        packer_git = args.packer_git
-    else:
-        sys.exit( bcolors.FAIL + my_name +
-           " error: packer git address is not specified" + bcolors.ENDC )
     show_pass( user = args.new_vm[ 0 ], password = password )
 
 if args.add_bridge:
@@ -197,3 +205,11 @@ if args.add_bridge:
             setup_bridge( br_on = args.add_bridge,
                           br_if = args.bridge_if,
                           br_ip = args.bridge_ip )
+
+if args.hv_up:
+    if args.packer_git:
+        packer_git = args.packer_git
+    else:
+        sys.exit( bcolors.FAIL + my_name,
+           "error: packer git address is not specified" + bcolors.ENDC )
+    hv_up()
