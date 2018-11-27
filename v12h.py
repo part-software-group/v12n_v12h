@@ -29,6 +29,7 @@ parser.add_argument( "--set-mem", help="set vm memory to (if maxmem)" )
 parser.add_argument( "--add-bridge", help="add bridge on, ex: eth0" )
 parser.add_argument( "--bridge-if", help="name of the bridge, ex: br0" )
 parser.add_argument( "--bridge-ip", help="ip address to set on bridge" )
+parser.add_argument( "--bridge-gw", help="gw address to set on bridge" )
 parser.add_argument( "--hv-up", help="rise up", action="store_true" )
 args = parser.parse_args()
 
@@ -126,21 +127,32 @@ def listdir_nohidden():
         if not f.startswith( '.' ) and not f == "lost+found":
             yield f
 
-def setup_bridge( br_on, br_if, br_ip ):
+def setup_bridge( br_on, br_if, br_ip, br_bg ):
     "setting up bridge interface and qemu related stuff"
     check_root()
     bo = str( br_on )
     bf = str( br_if )
     bi = str( br_ip )
+    bg = str( br_bg )
+    subprocess.call( [ "mv", "/etc/network/interfaces",
+                             "/etc/network/interfaces.old" ] )
+    with open( "/etc/network/interfaces", "w+" ) as lo:
+        lo.write( "# added by v12h\n"
+                  "auto lo\n"
+                  "iface lo inet loopback\n"
+                  "source-directory /etc/network/interfaces.d\n" )
     with open( "/etc/network/interfaces.d/" + bf, "w+" ) as br:
-        br.write( "auto " + bf + "\n"
+        br.write( "# added by v12h\n"
+                  "auto " + bf + "\n"
                   "iface " + bf + " inet static\n"
                   "  address " + bi + "\n"
+                  "  gateway " + bg + "\n"
                   "  bridge_ports " + bo + "\n"
                   "  bridge_stp off\n"
                   "  bridge_fd 0\n" )
     with open( "/etc/qemu/bridge.conf", "w+" ) as bc:
-        bc.write( "allow " + bf + "\n" )
+        bc.write( "# added by v12h\n"
+                  "allow " + bf + "\n" )
     subprocess.call( [ "ip", "address", "flush", bo, "scope", "global" ] )
     subprocess.call( [ "ifup", bf ] )
     subprocess.call( [ "setcap",
@@ -151,11 +163,14 @@ def hv_up():
     "setup all needed for a host to be a kvm hv"
     check_root()
     subprocess.call( [ "apt-get", "--yes", "--no-install-recommends", "install",
-                       "atop", "htop", "git", "screen", "udhcpd"
-                       "packer", "qemu-kvm", "libvirt-daemon-system",
-                       "libvirt-clients" ] )
+                       "atop", "htop", "git", "screen", "udhcpd", "packer",
+                       "parted", "qemu-utils", "qemu-kvm", "libguestfs-tools",
+                        "libvirt-clients", "libvirt-daemon-system" ] )
+    subprocess.call( [ "git", "-C", v12n_home, "clone",
+                       "--depth", "1", packer_git, v12n_home + "/.packer" ] )
     if not os.path.exists( v12n_home ):
-        os.makedirs( v12n_home )
+        os.makedirs( v12n_home + "/.iso" )
+        os.makedirs( "/etc/qemu" )
         print( bcolors.OKGREEN + my_name, v12n_home,
                "created" + bcolors.ENDC )
 
@@ -202,9 +217,11 @@ if args.new_vm:
 if args.add_bridge:
     if args.bridge_if:
         if args.bridge_ip:
-            setup_bridge( br_on = args.add_bridge,
-                          br_if = args.bridge_if,
-                          br_ip = args.bridge_ip )
+            if args.bridge_gw:
+                setup_bridge( br_on = args.add_bridge,
+                    br_if = args.bridge_if,
+                    br_ip = args.bridge_ip,
+                    br_bg = args.bridge_gw )
 
 if args.hv_up:
     if args.packer_git:
