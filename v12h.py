@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import os
 import sys
 import argparse
@@ -15,7 +16,9 @@ show, password_num = False, 12
 parser = argparse.ArgumentParser()
 parser.add_argument( "--list", "-l", help="list vms", action="store_true" )
 parser.add_argument( "--status", "-s", help="list with status on|off" )
-parser.add_argument( "--new-vm", help="create vm" )
+parser.add_argument( "--new-user", help="add new user" )
+parser.add_argument( "--new-vm", help="add new vm" )
+parser.add_argument( "--remove-user", help="remove everthing" )
 parser.add_argument( "--packer-tmpl", help="{buster,stretch}.json" )
 parser.add_argument( "--password", help="password" )
 parser.add_argument( "--show", help="show password", action="store_true" )
@@ -64,20 +67,16 @@ def su_as_vm( vm, command ):
     else:
         return( False )
 
-def show_pass( user, password ):
-    "show password or not"
+def new_user( user, password, user_home ):
+    "adding linux user"
     check_root()
     if show:
         print( bcolors.OKGREEN + my_name,
                "creating user", user, "with password", password +
                bcolors.ENDC )
-        create_user( user, password )
     else:
         print( bcolors.OKGREEN + my_name,
                "creating user", user + bcolors.ENDC )
-        create_user( user, password )
-
-def linux_adduser( user, user_home ):
     r = subprocess.call( [ "useradd", "--comment", "added_by_v12h",
                            "--create-home", "--home-dir", user_home,
                            "--no-user-group", "--group", "kvm",
@@ -85,21 +84,11 @@ def linux_adduser( user, user_home ):
                            "--key", "UID_MAX=2050",
                            user ] )
     if r == 0:
-        return( True )
-    else:
-        return( False )
-
-def create_user( user, password ):
-    "creating system user under /v12n as $HOME"
-    user_home = v12n_home + "/" + user
-
-    if linux_adduser( user, user_home ):
         print( bcolors.OKGREEN + my_name,
                "user", user, "created successfully" + bcolors.ENDC )
     else:
         sys.exit( bcolors.FAIL + my_name +
                   " error: adduser failed" + bcolors.ENDC )
-
     p1 = subprocess.Popen( [ "echo", user + ":" + password ],
                               stdout=subprocess.PIPE )
     p2 = subprocess.Popen( [ "chpasswd" ], stdin=p1.stdout )
@@ -109,15 +98,8 @@ def create_user( user, password ):
     os.chmod( user_home, 0o750 )
     subprocess.call( [ "chown", "-R", user + ":" + "kvm", user_home ] )
     print( bcolors.OKGREEN + my_name, "$HOME is " + user_home + bcolors.ENDC )
-    if create_vm( user, user_home ):
-        print( bcolors.OKGREEN + my_name,
-               "vm created successfully" + bcolors.ENDC )
-    else:
-        print( bcolors.FAIL + my_name,
-               "something went wrong. cleaning ..." + bcolors.ENDC )
-        subprocess.call( [ "deluser", "--remove-home", user ] )
 
-def create_vm( vm, user_home ):
+def new_vm( vm, user_home ):
     "creating vm with the help of packer"
     packer_json = packer_tmpl
     print( bcolors.OKGREEN + my_name,
@@ -125,10 +107,18 @@ def create_vm( vm, user_home ):
     su_as_vm( vm, "cp -r /v12n/.packer $HOME" )
     if su_as_vm( vm, "cd " + user_home + "/.packer/qemu/debian&&" +
                  "nano " + packer_json + "&&" + "packer build " + packer_json ):
-        return( True )
+        print( bcolors.OKGREEN + my_name,
+        "vm created successfully" + bcolors.ENDC )
     else:
-        return( False )
+        print( bcolors.FAIL + my_name,
+               "something went wrong. cleaning ..." + bcolors.ENDC )
+        remove_user( user)
 
+def remove_user( user ):
+    "removes everything"
+    check_root()
+    subprocess.call( [ "pkill", "-u", user ] )
+    subprocess.call( [ "deluser", "--remove-home", user ] )
 
 def password_gen( size ):
     "generating random password"
@@ -223,19 +213,32 @@ if args.list and not args.status:
 if args.show:
     show = True
 
+if args.new_user:
+    user = args.new_user
+    user_home = v12n_home + "/" + user
+    if args.password:
+        password = args.password
+    else:
+        password = password_gen( password_num )
+    new_user( user, password, user_home )
+
 if args.new_vm:
     user = args.new_vm
+    user_home = v12n_home + "/" + user
     if args.packer_tmpl:
         packer_tmpl = args.packer_tmpl
     else:
         sys.exit( bcolors.FAIL + my_name +
                 " error: packer template name is not specified" + bcolors.ENDC )
-
     if args.password:
         password = args.password
     else:
         password = password_gen( password_num )
-    show_pass( user, password )
+    new_user( user, password, user_home )
+    new_vm( user, user_home )
+
+if args.remove_user:
+    remove_user( args.remove_user)
 
 if args.add_bridge:
     if args.bridge_if:
