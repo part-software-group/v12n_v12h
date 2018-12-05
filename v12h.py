@@ -17,10 +17,11 @@ show, password_num = False, 12
 
 class bcolors:
     HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
+    OKBLUE = '\033[94m' + my_name
+    KBLUE = '\033[94m'
+    OKGREEN = '\033[92m' + my_name
+    WARNING = '\033[93m' + my_name
+    FAIL = '\033[91m' + my_name
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
@@ -28,18 +29,17 @@ class bcolors:
 def check_root():
     "some functions need root permission"
     if os.geteuid() != 0:
-        sys.exit(bcolors.FAIL + my_name +
-                 " error: must be root" + bcolors.ENDC)
+        sys.exit(bcolors.FAIL + " error: must be root" + bcolors.ENDC)
 
 def su_as_vm(vm, command):
     "su as user that runs vm"
     check_root()
     if vm:
         r = subprocess.call(["su", "-", vm, "-c", command])
-        print(bcolors.OKGREEN + my_name, command, r, bcolors.ENDC)
+        if args.verbose:
+            print(bcolors.OKGREEN, command, r, bcolors.ENDC)
     else:
-        print(bcolors.WARNING + my_name,
-              "no vm name specified" + bcolors.ENDC)
+        print(bcolors.WARNING, "no vm name specified" + bcolors.ENDC)
     if r == 0:
         return(True)
     else:
@@ -49,12 +49,11 @@ def new_user(user, password, user_home):
     "adding linux user"
     check_root()
     if args.show:
-        print(bcolors.OKGREEN + my_name,
+        print(bcolors.OKGREEN,
               "creating user", user, "with password", password +
               bcolors.ENDC)
     else:
-        print(bcolors.OKGREEN + my_name,
-              "creating user", user + bcolors.ENDC)
+        print(bcolors.OKGREEN, "creating user", user + bcolors.ENDC)
     r = subprocess.call(["useradd", "--comment", "added_by_v12h",
                          "--create-home", "--home-dir", user_home,
                          "--no-user-group", "--group", "kvm",
@@ -62,11 +61,10 @@ def new_user(user, password, user_home):
                          "--key", "UID_MAX=2050",
                          user])
     if r == 0:
-        print(bcolors.OKGREEN + my_name,
+        print(bcolors.OKGREEN,
               "user", user, "created successfully" + bcolors.ENDC)
     else:
-        sys.exit(bcolors.FAIL + my_name +
-                 " error: adduser failed" + bcolors.ENDC)
+        sys.exit(bcolors.FAIL + " error: adduser failed" + bcolors.ENDC)
     p1 = subprocess.Popen(["echo", user + ":" + password],
                            stdout=subprocess.PIPE)
     p2 = subprocess.Popen(["chpasswd" ], stdin=p1.stdout)
@@ -75,19 +73,16 @@ def new_user(user, password, user_home):
     os.makedirs(user_home + "/.local/share/libvirt")
     os.chmod(user_home, 0o750)
     subprocess.call(["chown", "-R", user + ":" + "kvm", user_home])
-    print(bcolors.OKGREEN + my_name, "$HOME is " + user_home + bcolors.ENDC)
+    print(bcolors.OKGREEN, "$HOME is " + user_home + bcolors.ENDC)
 
 def new_vm(vm, user_home, packer_tmpl):
     "creating vm with the help of packer"
-    print(bcolors.OKGREEN + my_name,
-          "creating vm with user", vm + bcolors.ENDC)
+    print(bcolors.OKGREEN, "creating vm with user", vm + bcolors.ENDC)
     if su_as_vm(vm, "cd " + user_home + "/.packer/qemu/debian&&" +
                 "packer build " + packer_tmpl):
-        print(bcolors.OKGREEN + my_name,
-              "vm created successfully" + bcolors.ENDC)
+        print(bcolors.OKGREEN, "vm created successfully" + bcolors.ENDC)
     else:
-        print(bcolors.FAIL + my_name,
-              "something went wrong. cleaning ..." + bcolors.ENDC)
+        print(bcolors.FAIL, "something went wrong. cleaning ..." + bcolors.ENDC)
         remove_user(user)
 
 def new_iso(user, user_home, iso):
@@ -97,6 +92,7 @@ def new_iso(user, user_home, iso):
 def remove_user(user):
     "removes everything"
     check_root()
+    print( bcolors.OKGREEN, "removing user", user, bcolors.ENDC)
     if subprocess.call(["pkill", "-u", user]):
         if subprocess.call(["deluser", "--remove-home", user]):
             subprocess.call(["rm", "-rf", "/v12n/" + user])
@@ -150,8 +146,7 @@ def hv_up():
         os.makedirs(v12n_home + ".iso")
     if not os.path.exists("/etc/qemu"):
         os.makedirs("/etc/qemu")
-        print(bcolors.OKGREEN + my_name, v12n_home,
-              "created" + bcolors.ENDC)
+        print(bcolors.OKGREEN, v12n_home, "created" + bcolors.ENDC)
     subprocess.call(["apt-get", "update"])
     subprocess.call(["apt-get", "--yes", "--no-install-recommends", "install",
                      "atop", "htop", "git", "screen", "udhcpd", "packer",
@@ -167,12 +162,13 @@ def packer_json(vm, user_home, packer_tmpl, key, val):
     with open(jtmpfile, "r") as json_file:
         json_data = json.load(json_file)
         json_data["variables"][key] = val
-        print(bcolors.OKGREEN + my_name, key + " set to " + val)
+        print(bcolors.OKGREEN, key + " set to " + val)
     with open(jtmpfile, "w") as json_file:
         json_file.write(json.dumps(json_data, indent=2))
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--verbose", help="verbose", action="store_true")
     parser.add_argument("--list", "-l", help="list vms", action="store_true")
     parser.add_argument("--status", "-s", help="list with status on|off")
     parser.add_argument("--new-user", help="add new user")
@@ -182,11 +178,6 @@ def main():
     parser.add_argument("--set", help="username, password, hostname, domain, vnc_port, apt_proxy, cpu, xcpu, memory, xmemory, diskz")
     parser.add_argument("--new-iso", help="username")
     parser.add_argument("--iso", help="under /v12n/.iso/")
-    parser.add_argument("--cpu", help="cpu maxcpu", nargs=2)
-    parser.add_argument("--memory", help="memory maxmemory", nargs=2)
-    parser.add_argument("--disk", help="disk size in MB")
-    parser.add_argument("--apt-proxy", help="ip:port without http://)")
-    parser.add_argument("--domain", help="domain name")
     parser.add_argument("--remove-user", help="remove everthing")
     parser.add_argument("--password", help="password")
     parser.add_argument("--show", help="show password", action="store_true")
@@ -223,10 +214,10 @@ def main():
         elif args.status == "off":
             state = "state-shutoff"
         for vm in listdir_nohidden():
-            print(bcolors.OKBLUE + "user: " + vm + bcolors.ENDC)
+            print(bcolors.KBLUE + "user: " + vm + bcolors.ENDC)
             i = -5
             while i <= len(vm):
-                print(bcolors.OKBLUE + "-", end="" + bcolors.ENDC)
+                print(bcolors.KBLUE + "-", end="" + bcolors.ENDC)
                 i += 1
             print()
             su_as_vm(vm, "virsh list --name --" + state)
@@ -250,7 +241,7 @@ def main():
         if args.packer_tmpl:
             packer_tmpl = args.packer_tmpl
         else:
-            sys.exit(bcolors.FAIL + my_name +
+            sys.exit(bcolors.FAIL +
                      " error: packer template name is not specified" +
                      bcolors.ENDC)
         if args.password:
@@ -272,8 +263,9 @@ def main():
             su_as_vm(user, "cp -r /tmp/.packer_qemu $HOME/.packer/qemu")
             shutil.rmtree("/tmp/.packer_qemu")
         else:
-            sys.exit( bcolors.FAIL + my_name +
-                      " error: use --set with --new-vm" + bcolors.ENDC)
+            remove_user(user)
+            sys.exit(bcolors.FAIL +
+                     " error: use --set with --new-vm" + bcolors.ENDC)
         new_vm(user, user_home, packer_tmpl)
 
     if args.new_iso:
@@ -282,8 +274,7 @@ def main():
         if args.iso:
             iso = args.iso
         else:
-            sys.exit(bcolors.FAIL + my_name +
-                     " error: no iso file found" + bcolors.ENDC)
+            sys.exit(bcolors.FAIL + " error: no iso file found" + bcolors.ENDC)
         if args.password:
             password = args.password
         else:
@@ -307,10 +298,13 @@ def main():
         if args.packer_git:
             packer_git = args.packer_git
         else:
-            sys.exit(bcolors.FAIL + my_name +
+            sys.exit(bcolors.FAIL +
                      " error: packer git address is not specified" +
                      bcolors.ENDC)
         hv_up()
+
+    if args.packer_tmpl or args.set and not args.new_vm:
+        sys.exit(bcolors.FAIL + " error: use with --new-vm" + bcolors.ENDC)
 
 if __name__ == "__main__":
     try:
