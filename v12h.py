@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import random
 import json
+import hashlib
+import socket
 #import libvirt
 
 my_name = '[v12h]'
@@ -52,8 +54,23 @@ def su_as_vm(vm, command):
         return(False)
 
 def password_gen(size):
-    'generating random password'
+    """generating random password. copied form stack"""
     return ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(size))
+
+def md5(fname):
+    """md5 the iso. copied form stack"""
+    hash_md5 = hashlib.md5()
+    with open(fname, 'rb') as f:
+        for chunk in iter(lambda: f.read(4096), b''):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
+def vnc_port():
+    """return available vnc port between 5900 to 5999. some copied from stack"""
+    random_port = random.randint(5900, 5999)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex(('localhost', random_port)) != 0:
+            return(random_port)
 
 def new_user(user, user_home):
     """adding linux user"""
@@ -170,7 +187,6 @@ def virt_install(mode, user, dicted):
             remove_user(user)
         cmd_iso = ' '.join(iso_opts)
         virt_install_iso = cmd_default + cmd_iso
-        print(virt_install_iso)
         if su_as_vm(vm, virt_install_iso):
             return True
         else:
@@ -188,34 +204,33 @@ def to_dict(the_list):
         i += 1
     return(the_dict)
 
-def after_dict(mode, dicted):
-    key_necss = ['cpu', 'memory', 'size', 'hostname', 'vnc', 'br', 'iso']
-    key_img = ['apt_proxy', 'domain', 'md5']
+def after_dict(mode, dicted, user):
+    key_necss = ['cpu', 'memory', 'size', 'br', 'iso']
+    key_defaults = {'vnc': str(vnc_port()), 'xcpu': dicted['cpu'],
+                    'xmemory': dicted['memory'], 'hostname': user,
+                    'domain': socket.getfqdn(), 'md5': md5(dicted['iso']),
+                    'apt_proxy': 'debian.asis.io'}
     if mode == 'check':
         for keyn in key_necss:
             if keyn not in dicted:
-                sys.exit(bcolors.FAIL + ' please set ' + keyn + bcolors.ENDC)
+                print(bcolors.FAIL, 'these keys MUST be present at --set:',
+                      str(key_necss), bcolors.ENDC)
+                sys.exit(bcolors.FAIL + ' you forgot ' + bcolors.BOLD +
+                         keyn + bcolors.ENDC)
         return(True)
-    if mode == 'check_img':
-        for keyi in key_img:
-            if keyi not in dicted:
-                sys.exit(bcolors.FAIL + ' please set ' + keyi + bcolors.ENDC)
     if mode == 'fix':
-        try:
-            dicted['xcpu']
-        except KeyError:
-            dicted['xcpu'] = dicted['cpu']
-        try:
-            dicted['xmemory']
-        except KeyError:
-            dicted['xmemory'] = dicted['memory']
+        for keyd in key_defaults:
+            try:
+                dicted[keyd]
+            except KeyError:
+                dicted[keyd] = key_defaults[keyd]
         return(dicted)
 
-def hv_up():
+def hv_up(packer_git):
     """setup all needed for a host to be a kvm hv"""
     check_root()
     if not os.path.exists(v12n_home):
-        os.makedirs(v12n_home + '.iso')
+        os.makedirs(v12n_home + '/.iso')
     if not os.path.exists('/etc/qemu'):
         os.makedirs('/etc/qemu')
         print(bcolors.OKGREEN, v12n_home, 'created' + bcolors.ENDC)
@@ -269,7 +284,7 @@ def main():
     parser.add_argument('--new-vm', help='add new vm')
     parser.add_argument('--packer-tmpl',
                         choices = [ 'buster.json', 'stretch.json' ] )
-    parser.add_argument('--set', help='username, password, hostname, domain, vnc_port, apt_proxy, cpu, xcpu, memory, xmemory, diskz')
+    parser.add_argument('--set', help='cpu, memory, size, vnc, br, iso')
     parser.add_argument('--new-iso', help='username')
     parser.add_argument('--remove-user', help='remove everthing')
     parser.add_argument('--show', help='show password', action='store_true')
@@ -278,18 +293,15 @@ def main():
     parser.add_argument('--console', '-n', help='console to vm', nargs=2)
     parser.add_argument('--start', '-S', help='start vm', nargs=2)
     parser.add_argument('--stop', '-D', help='stop vm', nargs=2)
-    parser.add_argument('--add-bridge', help='add bridge on, ex: eth0')
-    parser.add_argument('--bridge-if', help='name of the bridge, ex: br0')
-    parser.add_argument('--bridge-ip', help='ip address to set on bridge')
-    parser.add_argument('--bridge-gw', help='gw address to set on bridge')
+    parser.add_argument('--add-bridge', help='if=?,br=?,ip=?,bg=?')
     parser.add_argument('--hv-up', help='rise up', action='store_true')
     parser.add_argument('--packer-git', help='packer git address')
-    parser.add_argument('--test')
+    parser.add_argument('--test', action='store_true')
     global args
     args = parser.parse_args()
 
     if args.test:
-        True
+        print(vnc_port())
 
     if args.virsh:
         su_as_vm(args.virsh, 'virsh')
@@ -319,7 +331,7 @@ def main():
 
     if args.list and not args.status:
         for vm in listdir_nohidden():
-            print(bcolors.OKBLUE + vm + bcolors.ENDC)
+            print(bcolors.OKBLUE + ' ' + vm + bcolors.ENDC)
 
     if args.new_user:
         user = args.new_user
@@ -337,9 +349,8 @@ def main():
                      bcolors.ENDC)
         if args.set:
             dicted = to_dict(args.set)
-            if after_dict('check', dicted):
-                after_dict('check_img', dicted)
-                dicted = after_dict('fix', dicted)
+            if after_dict('check', dicted, user):
+                dicted = after_dict('fix', dicted, user)
                 new_user(user, user_home)
                 packer_json(user, user_home, packer_tmpl, dicted)
                 new_vm(user, user_home, packer_tmpl)
@@ -355,8 +366,8 @@ def main():
         user_home = v12n_home + user
         if args.set:
             dicted = to_dict(args.set)
-            if after_dict('check', dicted):
-                dicted = after_dict('fix', dicted)
+            if after_dict('check', dicted, user):
+                dicted = after_dict('fix', dicted, user)
                 new_user(user, user_home)
                 virt_install('iso', user, dicted)
             else:
@@ -388,12 +399,11 @@ def main():
 
     if args.hv_up:
         if args.packer_git:
-            packer_git = args.packer_git
+            hv_up(args.packer_git)
         else:
             sys.exit(bcolors.FAIL +
                      ' error: packer git address is not specified' +
                      bcolors.ENDC)
-        hv_up()
 
     #if args.packer_tmpl or args.set and not args.new_vm or not args.new_iso:
     #    sys.exit(bcolors.FAIL + ' error: use with --new-vm' + bcolors.ENDC)
@@ -405,6 +415,6 @@ if __name__ == '__main__':
         sys.exit(sys_e.code)
     except KeyboardInterrupt:
         logging.debug('', exc_info=True)
-        print_stderr(_('Installation aborted at user request'))
+        print_stderr(_('aborted at user request'))
     #except Exception as main_e:
      #   fail(main_e)
