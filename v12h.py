@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
-import os
-import sys
-import argparse
-import string
-import shutil
-import subprocess
-import random
-import json
-import hashlib
-import socket
-#import libvirt
+import os, sys, argparse, string, shutil, random
+import socket, libvirt, subprocess, hashlib, json
 
 my_name = '[v12h]'
 my_version = ''
@@ -28,26 +19,20 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
-def listdir_nohidden():
-    """list all in v12n_home but not hidden and lost+found"""
-    for f in os.listdir(v12n_home):
-        if not f.startswith('.') and not f == 'lost+found':
-            yield f
-
 def check_root():
     """some functions need root permission"""
     if os.geteuid() != 0:
         sys.exit(bcolors.FAIL + ' error: must be root' + bcolors.ENDC)
 
-def su_as_vm(vm, command):
-    """su as user that runs vm"""
+def su_as_domain(domain, command):
+    """su as user that runs domain"""
     check_root()
-    if vm:
-        r = subprocess.call(['su', '-', vm, '-c', command])
+    if domain:
+        r = subprocess.call(['su', '-', domain, '-c', command])
         if args.verbose:
             print(bcolors.OKGREEN, command, r, bcolors.ENDC)
     else:
-        print(bcolors.WARNING, 'no vm name specified' + bcolors.ENDC)
+        print(bcolors.WARNING, 'no domain name specified' + bcolors.ENDC)
     if r == 0:
         return(True)
     else:
@@ -128,26 +113,27 @@ def packer_json(user, user_home, packer_tmpl, dicted):
                 print(bcolors.FAIL, e, bcolors.ENDC)
                 remove_user(user)
             json_data['variables'][key] = val
-            print(bcolors.OKGREEN, key + ' set to ' + val, bcolors.ENDC)
+            if args.verbose:
+                print(bcolors.OKGREEN, key + ' set to ' + val, bcolors.ENDC)
     with open(jtmpfile, 'w') as json_file:
         json_file.write(json.dumps(json_data, indent=2))
 
-def new_vm(vm, user_home, packer_tmpl):
-    """creating vm with the help of packer"""
-    print(bcolors.OKGREEN, 'creating vm with user', vm + bcolors.ENDC)
-    if su_as_vm(vm, 'cd ' + user_home + '/.packer/qemu/debian&&' +
+def new_domain(domain, user_home, packer_tmpl):
+    """creating domain with the help of packer"""
+    print(bcolors.OKGREEN, 'creating domain with user', domain + bcolors.ENDC)
+    if su_as_domain(domain, 'cd ' + user_home + '/.packer/qemu/debian&&' +
                 'packer build ' + packer_tmpl):
         print(bcolors.OKGREEN, 'image created successfully' + bcolors.ENDC)
     else:
         print(bcolors.FAIL, 'something went wrong. cleaning ...' + bcolors.ENDC)
-        remove_user(vm)
+        remove_user(domain)
 
 def new_iso(user, user_home, iso):
     """using iso"""
     os.makedirs(user_home + local_libvirt + '/images')
 
 def virt_install(mode, user, dicted):
-    vm = user
+    domain = user
     try:
         cpu = dicted['cpu'] + ',maxvcpus=' + dicted['xcpu']
         memory = dicted['memory'] + ',maxmemory=' + dicted['xmemory']
@@ -158,7 +144,7 @@ def virt_install(mode, user, dicted):
         remove_user(user)
     default_opts = ['virt-install', '--connect', 'qemu:///session',
                     '--noautoconsole', '--virt-type', 'kvm', '--cpu', 'host',
-                    '--boot', 'hd', '--name', vm, '--vcpus', cpu,
+                    '--boot', 'hd', '--name', domain, '--vcpus', cpu,
                     '--memory', memory, '--network', net,
                     '--graphics', vnc, ' ']
     cmd_default = ' '.join(default_opts)
@@ -172,7 +158,8 @@ def virt_install(mode, user, dicted):
         virt_install_image = cmd_default + cmd_image + image
         print(bcolors.OKGREEN, 'installing image using virt-install',
               bcolors.ENDC)
-        if su_as_vm(vm, virt_install_image):
+        if su_as_domain(domain, virt_install_image):
+            print(bcolors.OKGREEN, "vnc port is:", vnc, bcolors.ENDC)
             return True
         else:
             return False
@@ -187,7 +174,8 @@ def virt_install(mode, user, dicted):
             remove_user(user)
         cmd_iso = ' '.join(iso_opts)
         virt_install_iso = cmd_default + cmd_iso
-        if su_as_vm(vm, virt_install_iso):
+        if su_as_domain(domain, virt_install_iso):
+            print(bcolors.OKGREEN, "vnc port:", dicted['vnc'], bcolors.ENDC)
             return True
         else:
             return False
@@ -197,19 +185,26 @@ def to_dict(the_list):
     first = the_list.split(',')
     i = 0
     while i < len(first):
-        sec = first[i].split('=')
-        key = sec[0]
-        val = sec[1]
-        the_dict[key] = val
-        i += 1
+        try:
+            sec = first[i].split('=')
+            key = sec[0]
+            val = sec[1]
+            the_dict[key] = val
+            i += 1
+        except IndexError:
+            sys.exit(bcolors.FAIL + ' extra , perhaps' + bcolors.ENDC)
     return(the_dict)
 
 def after_dict(mode, dicted, user):
     key_necss = ['cpu', 'memory', 'size', 'br', 'iso']
-    key_defaults = {'vnc': str(vnc_port()), 'xcpu': dicted['cpu'],
-                    'xmemory': dicted['memory'], 'hostname': user,
-                    'domain': socket.getfqdn(), 'md5': md5(dicted['iso']),
-                    'apt_proxy': 'debian.asis.io'}
+    try:
+        key_defaults = {'vnc': str(vnc_port()), 'xcpu': dicted['cpu'],
+                        'xmemory': dicted['memory'], 'hostname': user,
+                        'domain': socket.getfqdn(), 'md5': md5(dicted['iso']),
+                        'apt_proxy': 'debian.asis.io'}
+    except KeyError:
+        pass
+
     if mode == 'check':
         for keyn in key_necss:
             if keyn not in dicted:
@@ -272,80 +267,129 @@ def setup_bridge(br_on, br_if, br_ip, br_bg):
     subprocess.call(['ip', 'address', 'flush', bo, 'scope', 'global'])
     subprocess.call(['ifup', bf])
     subprocess.call(['setcap',
-                      'cap_net_admin+ep',
-                      '/usr/lib/qemu/qemu-bridge-helper'])
+                     'cap_net_admin+ep',
+                     '/usr/lib/qemu/qemu-bridge-helper'])
+
+def get_conn(user):
+    try:
+        conn = libvirt.open('qemu+unix:///session?socket=' +
+                            v12n_home + user +
+                            '/.cache/libvirt/libvirt-sock')
+    except libvirt.libvirtError as e:
+        sys.exit(bcolors.FAIL + ' could not connect' + bcolors.ENDC)
+    if conn == None:
+        sys.exit(bcolors.FAIL +
+                 ' failed to open connection to qemu:///session' +
+                 bcolors.ENDC)
+    else:
+        return(conn)
+
+def dom_status(conn):
+    domains = conn.listAllDomains(0)
+    for domain in domains:
+        state, reason = domain.state()
+        if state == libvirt.VIR_DOMAIN_RUNNING:
+            state = 'active'
+        if state == libvirt.VIR_DOMAIN_SHUTDOWN:
+            state = 'shutdown'
+        if state == libvirt.VIR_DOMAIN_SHUTOFF:
+            state = 'destroyed'
+        print(bcolors.OKGREEN, domain.name(), 'status:', state, bcolors.ENDC)
+    conn.close()
+
+def dom_act(conn, user, act):
+    dom = conn.lookupByName(user)
+    acts = {'start': 'dom.create()',
+            'stop': 'dom.destroy()'}
+    try:
+        if args.verbose:
+            print(acts[act])
+        exec(acts[act])
+        print(bcolors.OKGREEN, dom.name(),
+              'successfull', act, bcolors.ENDC)
+    except libvirt.libvirtError as e:
+        pass
+    conn.close()
+
+def dom_info(conn, user):
+    dom = conn.lookupByName(user)
+    infos = {'name': dom.name(),
+             'uuid': dom.UUIDString(),
+             'cpu': dom.info()[3],
+             'max cpu': dom.maxVcpus(),
+             'memory': dom.info()[2],
+             'max memory': dom.info()[1],
+             'time': dom.getTime()}
+    for info in infos:
+        print(bcolors.OKGREEN, info + ':', infos[info], bcolors.ENDC)
+    conn.close()
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--verbose', help='verbose', action='store_true')
-    parser.add_argument('--list', '-l', help='list vms', action='store_true')
-    parser.add_argument('--status', '-s', help='list with status on|off')
-    parser.add_argument('--new-user', help='add new user')
-    parser.add_argument('--new-vm', help='add new vm')
-    parser.add_argument('--packer-tmpl',
+    parser.add_argument('--verbose', '-v', help='verbose', action='store_true')
+    parser.add_argument('--new-domain', help='add new domain')
+    parser.add_argument('--packer', help='packer template to use',
+                        nargs='?', const='buster.json',
                         choices = [ 'buster.json', 'stretch.json' ] )
     parser.add_argument('--set', help='cpu, memory, size, vnc, br, iso')
     parser.add_argument('--new-iso', help='username')
     parser.add_argument('--remove-user', help='remove everthing')
+
     parser.add_argument('--show', help='show password', action='store_true')
-    parser.add_argument('--virsh', '-i', help='virsh of vm')
-    parser.add_argument('--edit', '-e', help='edit vm xml', nargs=2)
-    parser.add_argument('--console', '-n', help='console to vm', nargs=2)
-    parser.add_argument('--start', '-S', help='start vm', nargs=2)
-    parser.add_argument('--stop', '-D', help='stop vm', nargs=2)
+    parser.add_argument('--virsh', '-r', help='virsh of domain',
+                        nargs='?', const=os.environ.get('USER'))
+    parser.add_argument('--edit', '-e', help='edit domain xml')
+    parser.add_argument('--console', '-n', help='console to domain')
+    parser.add_argument('--status', '-u', help='domain status',
+                        nargs='?', const=os.environ.get('USER'))
+    parser.add_argument('--start', '-s', help='start domain',
+                        nargs='?', const=os.environ.get('USER'))
+    parser.add_argument('--stop', '-d', help='stop domain',
+                        nargs='?', const=os.environ.get('USER'))
+    parser.add_argument('--info', '-i', help='domain info',
+                        nargs='?', const=os.environ.get('USER'))
+
     parser.add_argument('--add-bridge', help='if=?,br=?,ip=?,bg=?')
     parser.add_argument('--hv-up', help='rise up', action='store_true')
     parser.add_argument('--packer-git', help='packer git address')
-    parser.add_argument('--test', action='store_true')
+    parser.add_argument('--new-user', help='add new user')
+    parser.add_argument('--test')
     global args
     args = parser.parse_args()
 
-    if args.test:
-        print(vnc_port())
+    if len(sys.argv) < 2 or args.status:
+        dom_status(get_conn(os.environ.get('USER')))
 
     if args.virsh:
-        su_as_vm(args.virsh, 'virsh')
+        su_as_domain(args.virsh, 'virsh')
     if args.edit:
-        su_as_vm(args.edit[0], 'virsh edit ' + args.edit[1])
+        su_as_domain(args.edit, 'virsh edit ' + args.edit)
     if args.console:
-        su_as_vm(args.console[0], 'virsh console ' + args.console[1])
+        su_as_domain(args.console, 'virsh console ' + args.console)
     if args.start:
-        su_as_vm(args.start[0], 'virsh start ' + args.start[1])
+        user = args.start
+        dom_act(get_conn(user), user, 'start')
     if args.stop:
-        su_as_vm(args.stop[0], 'virsh destroy ' + args.stop[1])
-
-    if args.list and args.status:
-        check_root()
-        if  args.status == 'on':
-            state = 'state-running'
-        elif args.status == 'off':
-            state = 'state-shutoff'
-        for vm in listdir_nohidden():
-            print(bcolors.KBLUE + 'user: ' + vm + bcolors.ENDC)
-            i = -5
-            while i <= len(vm):
-                print(bcolors.KBLUE + '-', end='' + bcolors.ENDC)
-                i += 1
-            print()
-            su_as_vm(vm, 'virsh list --name --' + state)
-
-    if args.list and not args.status:
-        for vm in listdir_nohidden():
-            print(bcolors.OKBLUE + ' ' + vm + bcolors.ENDC)
+        user = args.stop
+        dom_act(get_conn(user), user, 'stop')
+    if args.info:
+        user = args.info
+        dom_info(get_conn(user), user)
 
     if args.new_user:
         user = args.new_user
         user_home = v12n_home + user
         new_user(user, user_home)
 
-    if args.new_vm:
-        user = args.new_vm
+    if args.new_domain:
+        user = args.new_domain
         user_home = v12n_home + user
-        if args.packer_tmpl:
-            packer_tmpl = args.packer_tmpl
+        if args.packer:
+            packer_tmpl = args.packer
         else:
             sys.exit(bcolors.FAIL +
-                     ' error: packer template name is not specified' +
+                     ' error: packer template name is not specified.'
+                     ' user --packer' +
                      bcolors.ENDC)
         if args.set:
             dicted = to_dict(args.set)
@@ -353,13 +397,13 @@ def main():
                 dicted = after_dict('fix', dicted, user)
                 new_user(user, user_home)
                 packer_json(user, user_home, packer_tmpl, dicted)
-                new_vm(user, user_home, packer_tmpl)
+                new_domain(user, user_home, packer_tmpl)
                 virt_install('image', user, dicted)
             else:
                 remove_user(user)
         else:
             sys.exit(bcolors.FAIL +
-                     ' error: use --set with --new-vm' + bcolors.ENDC)
+                     ' error: use --set with --new-domain' + bcolors.ENDC)
 
     if args.new_iso:
         user = args.new_iso
@@ -404,9 +448,6 @@ def main():
             sys.exit(bcolors.FAIL +
                      ' error: packer git address is not specified' +
                      bcolors.ENDC)
-
-    #if args.packer_tmpl or args.set and not args.new_vm or not args.new_iso:
-    #    sys.exit(bcolors.FAIL + ' error: use with --new-vm' + bcolors.ENDC)
 
 if __name__ == '__main__':
     try:
