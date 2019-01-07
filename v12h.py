@@ -372,7 +372,7 @@ def fix_dict(dicted, domain):
             'domain': socket.getfqdn(),
             'md5': calculate_md5(dicted['iso']),
             'apt_proxy': 'debian.asis.io',
-            'br': 'br0'
+            'br': 'br1'
         }
     except KeyError:
         pass
